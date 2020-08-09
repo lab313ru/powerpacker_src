@@ -6,7 +6,12 @@
     <LocalDebuggerCommandArguments>TEST.TXT TEST_PP.TXT -e=4 -c=1234</LocalDebuggerCommandArguments>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <LocalDebuggerCommandArguments>CAV3_WIN95.MAP CAV3_WIN95_MY.MAP -e=5 -o</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>LS_ALL.VLO LS_ALL_MY.VLO -e=5</LocalDebuggerCommandArguments>
+    <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LocalDebuggerCommandArguments>LS_ALL.VLO LS_ALL_MY.VLO -e=5</LocalDebuggerCommandArguments>
     <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>

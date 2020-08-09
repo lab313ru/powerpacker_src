@@ -99,7 +99,7 @@ typedef struct {
     unsigned short wnd_left;
 } CrunchInfo;
 
-long get_file_size(const char* path) {
+static long get_file_size(const char* path) {
     FILE* f = fopen(path, "rb");
 
     if (f == NULL) {
@@ -129,8 +129,6 @@ static unsigned char* updateSpeedupLarge(unsigned char* curr, unsigned char* nex
         if (back != NULL) {
             int new_val = (int)(&src[i] - back);
             int diff = (int)(back - next);
-
-            //printf("%d %d\n", new_val, diff);
 
             if (diff >= 0 && new_val < info->wnd_max / sizeof(unsigned short)) {
                 if (diff >= info->wnd_left) {
@@ -241,7 +239,6 @@ static int ppCrunchBuffer_sub(progress_cb cb, CrunchInfo* info) {
 
             if (cb != NULL) {
                 cb((unsigned int)(info->print_pos - info->start), (unsigned int)(info->dst - info->start + (res.ptr - info->tmp) * sizeof(unsigned int)), info->fsize);
-                //printf("%08X\n", res.token);
             }
         }
 
@@ -270,13 +267,13 @@ static int ppCrunchBuffer_sub(progress_cb cb, CrunchInfo* info) {
                 next_src = &next_src[off];
                 info->wnd_off = (info->wnd_off + off);
 
-                if (&next_src[1 - repeats] < src_max && *next_src == src_curr[repeats] && next_src >= cmp_src) {
+                if (next_src < src_max && *next_src == src_curr[repeats] && next_src >= cmp_src) {
                     next_src = &next_src[1 - repeats];
 
                     cmp_src = &src_curr[2];
                     unsigned char* cmp_from = &next_src[1];
 
-                    while (*cmp_src++ == *cmp_from++);
+                    while (cmp_src < src_max && *cmp_src++ == *cmp_from++);
                     cmp_from--;
 
                     if (src_max < cmp_from) {
@@ -561,7 +558,7 @@ int ppWriteDataHeader(int eff, int crypt, unsigned int checksum, unsigned char* 
     return error;
 }
 
-int compress(const char* src_path, const char* dst_path, unsigned int fsize, CrunchInfo* info, const char* passwd, int eff) {
+static int compress(const char* src_path, const char* dst_path, unsigned int fsize, CrunchInfo* info, const char* passwd, int eff) {
     if (fsize == 0) {
         return -1;
     }
