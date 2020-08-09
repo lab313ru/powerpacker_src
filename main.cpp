@@ -666,8 +666,10 @@ static void print_help() {
 }
 
 int main(int argc, char* argv[]) {
-    printf("POWER-PACKER 2.3a Data Cruncher.\n");
+    printf("POWER-PACKER 36.10 (28.9.93) Data Cruncher.\n");
     printf(u8"  Written by Nico François (POWER PEAK)\n");
+    printf("  Decompiled by Dr. MefistO in 2020\n");
+    printf("  Version: v1.0\n\n");
 
     if (argc < 2) {
         print_help();
