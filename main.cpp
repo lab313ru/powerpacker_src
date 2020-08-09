@@ -5,14 +5,6 @@
 #define PX20 "PX20"
 #define PP20 "PP20"
 
-#define ANSI_COLOR_RED     "\x1b[31m"
-#define ANSI_COLOR_GREEN   "\x1b[32m"
-#define ANSI_COLOR_YELLOW  "\x1b[33m"
-#define ANSI_COLOR_BLUE    "\x1b[34m"
-#define ANSI_COLOR_MAGENTA "\x1b[35m"
-#define ANSI_COLOR_CYAN    "\x1b[36m"
-#define ANSI_COLOR_RESET   "\x1b[0m"
-
 static inline unsigned int rol(unsigned int n, int c)
 {
     const unsigned int mask = (CHAR_BIT * sizeof(n) - 1);  // assumes width is a power of 2.
@@ -88,7 +80,7 @@ typedef struct {
     unsigned short w10[4];
     unsigned char b2C[4];
     unsigned char* start;
-    unsigned int len;
+    unsigned int fsize;
     unsigned char* src_end;
 
     unsigned char** addrs;
@@ -135,8 +127,8 @@ static unsigned char* updateSpeedupLarge(unsigned char* curr, unsigned char* nex
         unsigned char* back = info->addrs[val];
 
         if (back != NULL) {
-            int new_val = &src[i] - back;
-            int diff = back - next;
+            int new_val = (int)(&src[i] - back);
+            int diff = (int)(back - next);
 
             //printf("%d %d\n", new_val, diff);
 
@@ -156,7 +148,7 @@ static unsigned char* updateSpeedupLarge(unsigned char* curr, unsigned char* nex
     return &src[count] - info->wnd_max;
 }
 
-static void writeBits(unsigned short count, unsigned int value, write_res_t* dst, CrunchInfo* info) {
+static void writeBits(int count, unsigned int value, write_res_t* dst, CrunchInfo* info) {
     for (int i = 0; i < count; ++i) {
         int bit = value & 1;
         value >>= 1;
@@ -179,7 +171,7 @@ static void writeBits(unsigned short count, unsigned int value, write_res_t* dst
     }
 }
 
-static void writeMoreBits(unsigned int count, write_res_t* dst, CrunchInfo* info) {
+static void writeMoreBits(int count, write_res_t* dst, CrunchInfo* info) {
     if (count < 4) {
         writeBits(2, count - 1, dst, info);
     }
@@ -215,19 +207,18 @@ static int ppCrunchBuffer_sub(progress_cb cb, CrunchInfo* info) {
         info->wnd2[i] = 0;
     }
 
-    for (int i = 0; i < info->addrs_count; ++i) {
+    for (int i = 0; i < (USHRT_MAX + 1); ++i) {
         info->addrs[i] = 0;
     }
 
     info->dst = info->start;
-    unsigned int fsize = info->src_end - info->start;
 
     info->wnd_off = 0;
     info->wnd_left = info->wnd_max;
     unsigned int max_size = info->wnd_left;
 
-    if (info->wnd_left >= fsize) {
-        max_size = fsize;
+    if (info->wnd_left >= info->fsize) {
+        max_size = info->fsize;
     }
 
     updateSpeedupLarge(&info->start[-info->wnd_max], info->start, max_size, info);
@@ -243,13 +234,13 @@ static int ppCrunchBuffer_sub(progress_cb cb, CrunchInfo* info) {
     int bits = 0;
 
     while (src_curr < info->src_end) { // check_end
-        int progress = src_curr - info->print_pos;
+        int progress = (int)(src_curr - info->print_pos);
 
         if (progress >= 0x200) {
             info->print_pos += progress;
 
             if (cb != NULL) {
-                cb(info->print_pos - info->start, info->dst - info->start + (res.ptr - info->tmp) * sizeof(unsigned int), info->len);
+                cb((unsigned int)(info->print_pos - info->start), (unsigned int)(info->dst - info->start + (res.ptr - info->tmp) * sizeof(unsigned int)), info->fsize);
                 //printf("%08X\n", res.token);
             }
         }
@@ -293,10 +284,10 @@ static int ppCrunchBuffer_sub(progress_cb cb, CrunchInfo* info) {
                         cmp_from = src_max;
                     }
 
-                    int curr_repeats = cmp_src - src_curr - 1;
+                    int curr_repeats = (int)(cmp_src - src_curr - 1);
 
                     if (repeats < curr_repeats) {
-                        int shift = cmp_from - src_curr - curr_repeats;
+                        int shift = (int)(cmp_from - src_curr - curr_repeats);
                         unsigned short curr_bits = 3;
 
                         if (curr_repeats < 5) {
@@ -430,12 +421,12 @@ static int ppCrunchBuffer_sub(progress_cb cb, CrunchInfo* info) {
         res.ptr++;
     }
 
-    int last_size = res.ptr - info->tmp;
+    int last_size = (int)(res.ptr - info->tmp);
 
     memcpy(info->dst, info->tmp, last_size * sizeof(unsigned int));
-    ((unsigned int*)info->dst)[last_size] = (fsize << 8) | (bits & 0xFF);
+    ((unsigned int*)info->dst)[last_size] = (info->fsize << 8) | (bits & 0xFF);
 
-    return info->dst - info->start + (last_size + 1) * sizeof(unsigned int);
+    return (int)(info->dst - info->start + last_size * sizeof(unsigned int) + sizeof(unsigned int));
 }
 
 static void print_progress(unsigned int src_off, unsigned int dst_off, unsigned int fsize) {
@@ -451,7 +442,7 @@ static void print_progress(unsigned int src_off, unsigned int dst_off, unsigned 
 
 int ppCrunchBuffer(unsigned int len, unsigned char* buf, CrunchInfo* info) {
     info->start = buf;
-    info->len = len;
+    info->fsize = len;
     info->src_end = &buf[len];
 
     return ppCrunchBuffer_sub(print_progress, info);
@@ -470,16 +461,16 @@ void ppFreeCrunchInfo(CrunchInfo* info) {
     free(info);
 }
 
-CrunchInfo* ppAllocCrunchInfo(int eff) {
+CrunchInfo* ppAllocCrunchInfo(int eff, int old_version) {
     CrunchInfo* info = (CrunchInfo*)malloc(sizeof(CrunchInfo));
 
     if (info == NULL) {
         return NULL;
     }
 
-    unsigned short eff_param3 = 10;
-    unsigned short eff_param2 = 11;
-    unsigned short eff_param1 = 11;
+    unsigned char eff_param3 = 10;
+    unsigned char eff_param2 = 11;
+    unsigned char eff_param1 = 11;
 
     switch (eff) {
     case 1:
@@ -519,14 +510,18 @@ CrunchInfo* ppAllocCrunchInfo(int eff) {
 
     info->addrs_count = 0x10000;
 
-    info->wnd_max = (1 << eff_param2) * sizeof(unsigned short);
+    int multiply = old_version ? 2 : 1;
 
-    info->wnd1 = (unsigned short*)malloc(info->wnd_max * sizeof(unsigned short) * 2);
-    info->wnd2 = &info->wnd1[info->wnd_max];
+    info->wnd_max = (unsigned int)(1 << eff_param2) * (int)sizeof(unsigned short) * multiply;
+
+    info->wnd1 = (unsigned short*)malloc(info->wnd_max * sizeof(unsigned short) * 2 * multiply);
+    info->wnd2 = NULL;
 
     info->addrs = NULL;
     if (info->wnd1) {
-        memset(info->wnd1, 0, info->wnd_max * sizeof(unsigned short) * 2);
+        info->wnd2 = &info->wnd1[info->wnd_max];
+
+        memset(info->wnd1, 0, info->wnd_max * sizeof(unsigned short) * 2 * multiply);
 
         info->addrs = (unsigned char**)malloc(info->addrs_count * sizeof(unsigned char*));
 
@@ -623,7 +618,7 @@ int compress(const char* src_path, const char* dst_path, unsigned int fsize, Cru
 
     printf("\n");
     printf("  Normal length   : %d bytes.\n", fsize);
-    printf("  Crunched length : %d bytes. " ANSI_COLOR_YELLOW "(Gained %d%%)" ANSI_COLOR_RESET "\n", crunched_len, (100 - (crunched_len * 100) / fsize));
+    printf("  Crunched length : %d bytes. (Gained %d%%)\n", crunched_len, (100 - (crunched_len * 100) / fsize));
 
     FILE* dst_h = fopen(dst_path, "wb");
 
@@ -657,45 +652,66 @@ int compress(const char* src_path, const char* dst_path, unsigned int fsize, Cru
     return 0;
 }
 
+static void print_help() {
+    printf("Usage : Crunch <source> <destination> [-e=EFFICIENCY] [-c=PASSWORD] [-o] [-h]\n"
+        "With:\n"
+        "  EFFICIENCY: 1 = Fast, 2 = Mediocre, 3 = Good (def), 4 = Very Good, 5 = Best\n"
+        "    PASSWORD: Encrypt file. Max 16 characters\n"
+        "          -o: Use it to compress with the old PP alorithm.\n"
+        "              The difference in the size of a window:\n"
+        "              - Old version: 0x4000\n"
+        "              - New version: 0x8000\n"
+        "          -h: Show this help\n\n"
+    );
+}
+
 int main(int argc, char* argv[]) {
-    printf(ANSI_COLOR_GREEN "POWER-PACKER 2.3a" ANSI_COLOR_RESET " Data Cruncher.\n");
-    printf(ANSI_COLOR_RED "  Written by Nico François (POWER PEAK)" ANSI_COLOR_RESET "\n");
+    printf("POWER-PACKER 2.3a Data Cruncher.\n");
+    printf(u8"  Written by Nico François (POWER PEAK)\n");
 
     if (argc < 2) {
-        printf("Usage : Crunch <source> <destination> [-e=EFFICIENCY] [-c]\n"
-            "With:\n"
-            "  EFFICIENCY: 1 = Fast, 2 = Mediocre, 3 = Good (def), 4 = Very Good, 5 = Best\n"
-            "  -c        : Encrypt file.\n\n"
-        );
+        print_help();
         return -1;
     }
 
     char passwd[17];
     memset(passwd, 0, sizeof(passwd));
 
+    int old_version = 0;
     int eff = 3;
     int i = 3;
     while (i < argc) {
         if (((argv[i][0] == '-') || (argv[i][0] == '/'))) {
             switch (argv[i][1]) {
+            case 'h':
+                print_help();
+                return 0;
             case 'e': {
-                sscanf(&argv[i][3], "%d", &eff);
+                if (sscanf(&argv[i][3], "%d", &eff) != 1) {
+                    return -1;
+                }
             } break;
             case 'c': {
-                sscanf(&argv[i][3], "%16s", passwd);
+                if (sscanf(&argv[i][3], "%16s", passwd) != 1) {
+                    return -1;
+                }
             } break;
+            case 'o': {
+                old_version = 1;
+                break;
+            }
             }
         }
 
         i++;
     }
 
-    CrunchInfo* info = ppAllocCrunchInfo(eff);
+    CrunchInfo* info = ppAllocCrunchInfo(eff, old_version);
 
     unsigned int fsize = get_file_size(argv[1]);
 
     int result = compress(argv[1], argv[2], fsize, info, passwd[0] != 0 ? passwd : NULL, eff);
-    printf("\n" ANSI_COLOR_BLUE "Done." ANSI_COLOR_RESET "\n");
+    printf("\nDone.\n");
 
     ppFreeCrunchInfo(info);
 

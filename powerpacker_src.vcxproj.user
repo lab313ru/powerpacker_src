@@ -6,7 +6,7 @@
     <LocalDebuggerCommandArguments>TEST.TXT TEST_PP.TXT -e=4 -c=1234</LocalDebuggerCommandArguments>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <LocalDebuggerCommandArguments>JUNM_RAM.VLO JUNM_RAM_MY.VLO -e=5</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>CAV3_WIN95.MAP CAV3_WIN95_MY.MAP -e=5 -o</LocalDebuggerCommandArguments>
     <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
