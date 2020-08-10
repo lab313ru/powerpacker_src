@@ -858,10 +858,6 @@ int ppLoadData(const char* filename, decrunch_t** bufferptr, const char* passwd)
         return -1;
     }
 
-    FILE* t = fopen("test_b.bin", "wb");
-    fwrite(info->src, 1, read_len - sizeof(decrunch_t) - 8, t);
-    fclose(t);
-
     return ppDecrunchBuffer(info->src, read_len - sizeof(decrunch_t) - 8, info->dst, dest_len);
 }
 
