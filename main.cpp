@@ -1,6 +1,7 @@
 ﻿#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <climits>
 
 const char PX20[] = "PX20";
 const char PP20[] = "PP20";
