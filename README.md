@@ -24,6 +24,6 @@ With:
 
 I've decompiled the original library and restored source code of the original compression algo (including the encryption).
 
-# Screnshots
+# Screenshots
 
 ![](/img/file1.png?raw=true)
