@@ -3,10 +3,10 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
-    <LocalDebuggerCommandArguments>TEST.TXT TEST_PP.TXT -e=4 -c=1234</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>LS_ALL_MY.VLO LS_ALL_NEW.VLO -d</LocalDebuggerCommandArguments>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <LocalDebuggerCommandArguments>LS_ALL.VLO LS_ALL_MY.VLO -e=5</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>2_CAV1.MAP CAV1_MY.MAP -d -p=test</LocalDebuggerCommandArguments>
     <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>

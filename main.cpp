@@ -2,8 +2,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define PX20 "PX20"
-#define PP20 "PP20"
+const char PX20[] = "PX20";
+const char PP20[] = "PP20";
+const char PPMM[] = "PPMM";
 
 static inline unsigned int rol(unsigned int n, int c)
 {
@@ -66,6 +67,20 @@ static size_t write_dwords(FILE* f, unsigned int* buf, int count) {
     }
 
     return result;
+}
+
+static unsigned short read_word(FILE* f) {
+    unsigned char b1;
+    unsigned char b2;
+    fread(&b1, 1, sizeof(b1), f);
+    fread(&b2, 1, sizeof(b2), f);
+
+    return (b1 << 8) | b2;
+}
+
+static unsigned int read_dword(FILE* f) {
+    unsigned int result = read_word(f);
+    return (result << 16) | read_word(f);
 }
 
 typedef struct {
@@ -533,11 +548,11 @@ CrunchInfo* ppAllocCrunchInfo(int eff, int old_version) {
     return NULL;
 }
 
-int ppWriteDataHeader(int eff, int crypt, unsigned int checksum, unsigned char* table, FILE* dst_h) {
+int ppWriteDataHeader(int eff, int crypt, unsigned short checksum, unsigned char* table, FILE* dst_h) {
     int error = 0;
 
     if (crypt) {
-        if (fwrite(PX20, 1, 4, dst_h) != 4) {
+        if (fwrite(PX20, 1, sizeof(PX20) - 1, dst_h) != sizeof(PX20) - 1) {
             error = 1;
         }
 
@@ -546,7 +561,7 @@ int ppWriteDataHeader(int eff, int crypt, unsigned int checksum, unsigned char* 
         }
     }
     else {
-        if (!error && fwrite(PP20, 1, 4, dst_h) != 4) {
+        if (!error && fwrite(PP20, 1, sizeof(PP20) - 1, dst_h) != sizeof(PP20) - 1) {
             error = 1;
         }
     }
@@ -610,7 +625,7 @@ static int compress(const char* src_path, const char* dst_path, unsigned int fsi
 
     if (passwd) {
         printf("Encrypting...\n");
-        encrypt((unsigned int*)info->start, (crunched_len / 4)  - 1, passkey);
+        encrypt((unsigned int*)info->start, (crunched_len / 4) - 1, passkey);
     }
 
     printf("\n");
@@ -649,11 +664,216 @@ static int compress(const char* src_path, const char* dst_path, unsigned int fsi
     return 0;
 }
 
+void ppDecrypt(unsigned char* buffer, int size, unsigned int key) {
+    for (int i = 0; i < size; i += 4) {
+        buffer[i + 0] ^= (key >> 24) & 0xFF;
+        buffer[i + 1] ^= (key >> 16) & 0xFF;
+        buffer[i + 2] ^= (key >> 8) & 0xFF;
+        buffer[i + 3] ^= (key >> 0) & 0xFF;
+    }
+}
+
+/* the decoder presented here is taken from pplib by Stuart Caie. The
+ * following statement comes from the original source.
+ *
+ * pplib 1.0: a simple PowerPacker decompression and decryption library
+ * placed in the Public Domain on 2003-09-18 by Stuart Caie.
+ */
+
+#define PP_READ_BITS(nbits, var) do {				\
+	bit_cnt = (nbits); (var) = 0;				\
+	while (bits_left < bit_cnt) {				\
+		if (buf < src) return -1;			\
+		bit_buffer |= *--buf << bits_left;		\
+		bits_left += 8;					\
+	}							\
+	bits_left -= bit_cnt;					\
+	while (bit_cnt--) {					\
+		(var) = ((var) << 1) | (bit_buffer & 1);	\
+		bit_buffer >>= 1;				\
+	}							\
+} while (0)
+
+#define PP_BYTE_OUT(byte) do {					\
+	if (out <= dest) return -1;				\
+	*--out = (byte); written++;				\
+} while (0)
+
+int ppDecrunchBuffer(unsigned char* src, unsigned int src_len, unsigned char* dest, unsigned int dest_len) {
+    unsigned char* buf, *out, *dest_end, *off_lens, bits_left = 0, bit_cnt;
+    unsigned int bit_buffer = 0, x, todo, offbits, offset, written = 0;
+
+    if (!src || !dest) return -1;
+
+    /* set up input and output pointers */
+    off_lens = src; src = &src[4];
+    buf = &src[src_len];
+
+    out = dest_end = &dest[dest_len];
+
+    /* skip the first few bits */
+    PP_READ_BITS(src[src_len + 3], x);
+
+    /* while there are input bits left */
+    while (written < dest_len) {
+        PP_READ_BITS(1, x);
+        if (x == 0) {
+            /* bit==0: literal, then match. bit==1: just match */
+            todo = 1; do { PP_READ_BITS(2, x); todo += x; } while (x == 3);
+            while (todo--) { PP_READ_BITS(8, x); PP_BYTE_OUT(x); }
+
+            /* should we end decoding on a literal, break out of the main loop */
+            if (written == dest_len) break;
+        }
+
+        /* match: read 2 bits for initial offset bitlength / match length */
+        PP_READ_BITS(2, x);
+        offbits = off_lens[x];
+        todo = x + 2;
+        if (x == 3) {
+            PP_READ_BITS(1, x);
+            if (x == 0) offbits = 7;
+            PP_READ_BITS(offbits, offset);
+            do { PP_READ_BITS(3, x); todo += x; } while (x == 7);
+        }
+        else {
+            PP_READ_BITS(offbits, offset);
+        }
+        if (&out[offset] >= dest_end) return -1; /* match_overflow */
+        while (todo--) { x = out[offset]; PP_BYTE_OUT(x); }
+    }
+
+    /* all output bytes written without error */
+    return 0;
+}
+
+typedef struct {
+    unsigned int tag;
+    unsigned char* src;
+    unsigned int src_len;
+    unsigned char* dst;
+    unsigned int dst_len;
+} decrunch_t;
+
+int ppLoadData(const char* filename, decrunch_t** bufferptr, const char* passwd) {
+    *bufferptr = NULL;
+
+    FILE* f = fopen(filename, "rb");
+
+    if (f == NULL) {
+        return -1;
+    }
+
+    fseek(f, 0, SEEK_END);
+    unsigned int buf_len = (unsigned int)ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (buf_len == 0) {
+        fclose(f);
+        return -1;
+    }
+
+    char tag[4];
+
+    if (fread(tag, 1, sizeof(tag), f) != sizeof(tag)) {
+        fclose(f);
+        return -1;
+    }
+
+    unsigned int dest_len = 0;
+    unsigned int read_len = 0;
+    int offset = 4;
+    unsigned short checksum = 0;
+
+    if (!memcmp(PP20, tag, sizeof(tag))) {
+        fseek(f, -4, SEEK_END);
+
+        dest_len = read_dword(f);
+
+        read_len = buf_len - offset + sizeof(decrunch_t);
+        dest_len = (dest_len >> 8);
+    }
+    else if (!memcmp(PX20, tag, sizeof(tag))) {
+        checksum = read_word(f);
+        offset += 2;
+
+        fseek(f, -4, SEEK_END);
+
+        dest_len = read_dword(f);
+
+        read_len = buf_len - offset + sizeof(decrunch_t);
+        dest_len = (dest_len >> 8);
+    }
+    else {
+        fclose(f);
+        return -1;
+    }
+
+    unsigned char* buffer = (unsigned char*)malloc(read_len);
+    memset(buffer, 0, read_len);
+
+    if (buffer == NULL) {
+        fclose(f);
+        return -1;
+    }
+
+    fseek(f, offset, SEEK_SET);
+
+    if (fread(&buffer[sizeof(decrunch_t)], 1, read_len - sizeof(decrunch_t), f) != read_len - sizeof(decrunch_t)) {
+        fclose(f);
+        free(buffer);
+        return -1;
+    }
+
+    fclose(f);
+
+    decrunch_t* info = (decrunch_t*)buffer;
+    *bufferptr = info;
+    info->src = &buffer[sizeof(decrunch_t)];
+
+    if (offset == 6) {
+        if ((passwd == NULL) || (strlen(passwd) > 16)) {
+            fclose(f);
+            free(buffer);
+            return -1;
+        }
+
+        if (ppCalcChecksum(passwd) != checksum) {
+            fclose(f);
+            free(buffer);
+            return -1;
+        }
+
+        unsigned int key = ppCalcPasskey(passwd);
+        ppDecrypt(&info->src[4], read_len - sizeof(decrunch_t) - 8, key);
+    }
+
+    memcpy(&info->tag, PPMM, sizeof(PPMM));
+    info->src_len = read_len - sizeof(decrunch_t);
+    info->dst_len = dest_len;
+
+    info->dst = (unsigned char*)malloc(dest_len);
+
+    if (info->dst == NULL) {
+        return -1;
+    }
+
+    FILE* t = fopen("test_b.bin", "wb");
+    fwrite(info->src, 1, read_len - sizeof(decrunch_t) - 8, t);
+    fclose(t);
+
+    return ppDecrunchBuffer(info->src, read_len - sizeof(decrunch_t) - 8, info->dst, dest_len);
+}
+
 static void print_help() {
-    printf("Usage : Crunch <source> <destination> [-e=EFFICIENCY] [-c=PASSWORD] [-o] [-h]\n"
+    printf(
+        "  Crunch: powerpack <source> <destination> <-c> [-e=EFFICIENCY] [-p=PASSWORD] [-o] [-h]\n"
+        "Decrunch: powerpack <source> <destination> <-d> [-p=PASSWORD] [-h]\n"
         "With:\n"
+        "          -c: Crunch (compress)\n"
+        "          -d: Decrunch (decompress)\n"
         "  EFFICIENCY: 1 = Fast, 2 = Mediocre, 3 = Good (def), 4 = Very Good, 5 = Best\n"
-        "    PASSWORD: Encrypt file. Max 16 characters\n"
+        "    PASSWORD: Encrypt/decrypt file. Max 16 characters\n"
         "          -o: Use it to compress with the old PP alorithm.\n"
         "              The difference in the size of a window:\n"
         "              - Old version: 0x4000\n"
@@ -679,9 +899,17 @@ int main(int argc, char* argv[]) {
     int old_version = 0;
     int eff = 3;
     int i = 3;
+    int mode = -1;
+
     while (i < argc) {
         if (((argv[i][0] == '-') || (argv[i][0] == '/'))) {
             switch (argv[i][1]) {
+            case 'c': {
+                mode = 0;
+            } break;
+            case 'd': {
+                mode = 1;
+            } break;
             case 'h':
                 print_help();
                 return 0;
@@ -690,7 +918,7 @@ int main(int argc, char* argv[]) {
                     return -1;
                 }
             } break;
-            case 'c': {
+            case 'p': {
                 if (sscanf(&argv[i][3], "%16s", passwd) != 1) {
                     return -1;
                 }
@@ -705,14 +933,52 @@ int main(int argc, char* argv[]) {
         i++;
     }
 
-    CrunchInfo* info = ppAllocCrunchInfo(eff, old_version);
+    if (mode == -1) {
+        printf("Incorrect mode. Please, use '-c' to crunch or '-d' to decrunch\n\n");
+        print_help();
+        return -1;
+    }
 
-    unsigned int fsize = get_file_size(argv[1]);
+    int result = -1;
 
-    int result = compress(argv[1], argv[2], fsize, info, passwd[0] != 0 ? passwd : NULL, eff);
-    printf("\nDone.\n");
+    if (mode == 0) {
+        CrunchInfo* info = ppAllocCrunchInfo(eff, old_version);
 
-    ppFreeCrunchInfo(info);
+        unsigned int fsize = get_file_size(argv[1]);
+
+        result = compress(argv[1], argv[2], fsize, info, passwd[0] != 0 ? passwd : NULL, eff);
+        ppFreeCrunchInfo(info);
+        printf("\nDone.\n");
+    }
+    else {
+        decrunch_t* info;
+
+        result = ppLoadData(argv[1], &info, passwd[0] != 0 ? passwd : NULL);
+
+        if (info == NULL) {
+            printf("Cannot decrunch '%s'!\n", argv[1]);
+            return -1;
+        }
+
+        FILE* dst_h = fopen(argv[2], "wb");
+
+        if (dst_h == NULL) {
+            printf("Cannot open '%s' for write!\n", argv[2]);
+            free(info);
+            return -1;
+        }
+
+        if (fwrite(info->dst, 1, info->dst_len, dst_h) != info->dst_len) {
+            printf("Cannot write to '%s'!\n", argv[2]);
+            result = -1;
+        }
+
+        printf("Successfully decrunched '%s' into '%s'\n", argv[1], argv[2]);
+        printf("Result: %d -> %d bytes\n", info->src_len, info->dst_len);
+
+        free(info);
+        fclose(dst_h);
+    }
 
     return result;
 }

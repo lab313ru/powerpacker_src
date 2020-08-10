@@ -24,6 +24,7 @@
     <ProjectGuid>{0aec9211-ada2-487e-b568-e6252c94252e}</ProjectGuid>
     <RootNamespace>powerpackersrc</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>powerpack</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
